@@ -6,8 +6,9 @@ REM  Produces a folder that runs on a machine with no Python installed. Zip it
 REM  for download, or point Inno Setup at it for a real installer.
 REM ===========================================================================
 setlocal
-REM Work from the script's own folder, so it can be launched from anywhere.
-cd /d "%~dp0"
+REM Work from the repo root (this script lives in packaging\), so it can be
+REM launched from anywhere.
+cd /d "%~dp0.."
 
 set VENV=venv\Scripts
 if not exist "%VENV%\python.exe" (
@@ -38,7 +39,7 @@ REM Shipping a build that does not pass its own tests is how a demo dies.
 
 echo.
 echo == Freezing ================================================================
-"%VENV%\python.exe" -m PyInstaller AethericGeometry.spec --noconfirm || exit /b 1
+"%VENV%\python.exe" -m PyInstaller packaging\AethericGeometry.spec --noconfirm || exit /b 1
 
 echo.
 echo == Copying the editable config beside the exe ==============================

@@ -25,9 +25,13 @@ pip install -r requirements.txt
 ## Building the Executable
 
 ```bat
-build.bat           # Windows  → dist\AethericGeometry.exe
-bash build.sh       # Mac/Linux
+packaging\build.bat      # Windows  → dist\AethericGeometry\AethericGeometry.exe
+bash packaging/build.sh  # Mac/Linux
 ```
+
+Build scripts and the PyInstaller spec live in `packaging/`; they resolve the
+repo root themselves (`PROJECT = Path(SPECPATH).parent`), so `main.py`,
+`config.yaml` and `models/` are still found at the top level.
 
 ## Architecture
 
@@ -50,6 +54,8 @@ aetheric/        — engine package (importable as `aetheric.*`)
   config.py      — loads config.yaml, exposes flat constants with safe fallbacks
 tests/           — pytest suite (gestures, audio_map, synth, dsp, tuning, knob, voice)
 analysis/        — measure_dsp.py: reproduces every number quoted below
+packaging/       — PyInstaller spec + build.bat / build.sh
+docs/            — LaTeX technical report (PDF + source)
 ```
 
 **Imports:** modules inside `aetheric/` use relative imports (`from .dsp import`);

@@ -65,7 +65,7 @@ Requires Python 3.10+ and a webcam.
 **Optional — MIDI out:** `pip install mido python-rtmidi`, then set `midi_port` in `config.yaml`.
 **Optional — voice control:** download a [Vosk model](https://alphacephei.com/vosk/models) into `models/` (see [Voice control](#6-voice-control)).
 
-No Python? A prebuilt Windows binary is produced by `build.bat` at `dist\AethericGeometry.exe` — double-click and go.
+No Python? A prebuilt Windows binary is produced by `packaging\build.bat` at `dist\AethericGeometry.exe` — double-click and go.
 
 ---
 
@@ -269,6 +269,7 @@ aetheric/           — the engine package
 └── config.py       — loads config.yaml, exposes flat constants with safe fallbacks
 tests/              — pytest suite (gestures, audio_map, synth, dsp, tuning, knob, voice)
 analysis/           — offline measurement scripts that reproduce every quoted figure
+packaging/          — PyInstaller spec + build scripts (build.bat / build.sh)
 docs/               — LaTeX technical report (PDF + source)
 models/             — Vosk speech models (not committed; download separately)
 assets/             — demo video and images (not committed; video is on YouTube)
@@ -287,14 +288,16 @@ The HUD is worth a note: text goes through Pillow with real TrueType faces (Open
 
 **Windows:**
 ```bat
-build.bat
+packaging\build.bat
 ```
-Produces `dist\AethericGeometry.exe`. If MediaPipe data files fail at runtime under `--onefile`, drop that flag — a folder build is more reliable.
+Produces `dist\AethericGeometry\AethericGeometry.exe` (a one-folder build). It runs the test suite first and copies `config.yaml` beside the executable so it stays editable after install.
 
 **macOS / Linux:**
 ```bash
-bash build.sh
+bash packaging/build.sh
 ```
+
+Both scripts can be launched from anywhere — they resolve the repo root themselves.
 
 ---
 

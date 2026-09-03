@@ -233,3 +233,6 @@ models/
 assets/
 # Runtime recordings from the `r` key
 recording_*.wav
+
+# The PyInstaller spec is hand-written build source, not generated output
+!packaging/AethericGeometry.spec
