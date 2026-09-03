@@ -1,0 +1,145 @@
+# =============================================================================
+#  Aetheric Geometry - configuration
+# =============================================================================
+
+# -- Gesture thresholds (pixels) ----------------------------------------------
+thresholds:
+  pinch:            60    # thumb-tip to fingertip
+  double_pinch:     90    # kiss midpoint distance
+  pyramid:          70    # cross-hand fingertip pair
+  prayer_dist:      160
+  open_palm_spread: 100
+
+# -- Timing (frames) ----------------------------------------------------------
+timing:
+  cooldown_frames: 45     # frames before auto-reset to IDLE (~1.5 s at 30 fps)
+
+# -- Display ------------------------------------------------------------------
+# The camera frame is resampled to this size BEFORE the HUD is drawn, so text is
+# rasterised once at final resolution and never rescaled by the window. Many
+# webcams only deliver 1920x1080 and ignore requests for anything smaller;
+# letting the window shrink the finished frame is what made the text look
+# chewed. Raise for a big screen, lower for more speed.
+display:
+  width:  1280
+  height: 720
+
+# -- Gesture-layer colours (BGR, drawn by OpenCV) -----------------------------
+# HUD colours live in ui.py, which speaks RGB for Pillow.
+colors:
+  neon_green: [70,  230, 90]
+  neon_cyan:  [240, 210, 40]
+  neon_pink:  [215, 65,  230]
+  text_dim:   [145, 135, 165]
+  near_white: [230, 225, 242]
+  warm_red:   [40,  40,  220]
+
+# -- Audio --------------------------------------------------------------------
+# Envelope and smoothing are TIME CONSTANTS IN SECONDS, not raw one-pole
+# coefficients: a coefficient means a different envelope at every sample rate.
+audio:
+  sample_rate:       44100
+  block_size:        512
+  amplitude_hilo:    0.28
+  amplitude_polygon: 0.22
+  attack_tau:        0.0028
+  release_tau:       0.0113
+  reverb_tail_tau:   1.2
+  reverb_rt60_min:   0.35
+  reverb_rt60_max:   6.0
+  filter_min_hz:     200
+  filter_max_hz:     8000
+  drive_max:         12.0
+  midi_port:         null   # internal-engine note output; see the midi section
+
+# -- Rotary hand knob ---------------------------------------------------------
+# Pinch and rotate the hand as if turning a knob facing the camera. Distances
+# are in palm widths so nothing drifts as the hand moves towards the lens.
+knob:
+  turns_for_full_range: 0.5
+  dead_zone_radians:    0.012
+  pinch_close_below:    0.60
+  pinch_open_above:     0.90
+  extended_above:       1.60
+  folded_below:         1.30
+  require_extended:     2
+
+# -- Voice commands -----------------------------------------------------------
+# Offline recognition via Vosk, English and Spanish at the same time.
+#
+# Both models run in parallel on one microphone stream. An acoustic model is
+# language-specific - "hold" is not in the Spanish lexicon and "congela" is not
+# in the English one - so decoding twice is the only way to hear both. Remove a
+# line to drop that language and halve the CPU cost.
+voice:
+  enabled: true
+  models:
+    en: models/vosk-model-small-en-us-0.15
+    es: models/vosk-model-small-es-0.42
+  device:      null
+  sample_rate: 16000
+  # Confidence a word must reach when spoken ALONE, with no wake word.
+  min_confidence: 0.85
+  # Relaxed threshold for words inside a phrase that followed the wake word.
+  # Connected speech scores far lower per word than an isolated one: a single
+  # strict threshold accepted "eco" on its own and silently dropped the same
+  # word inside "aether, pillame el eco y bajalo" - which reads as the wake
+  # word working and the sentence being ignored.
+  phrase_confidence: 0.45
+  # The wake word sits between the two. It is spoken *inside* the sentence it
+  # introduces, so holding it to the strict threshold means it never opens the
+  # window and the whole sentence is dropped - which looks like the name being
+  # heard and nothing happening. Dropping it to the lax threshold would let
+  # room noise open the window instead.
+  wake_confidence: 0.55
+  # Peak RMS an utterance must reach to count as speech at all. Confidence says
+  # *which* word a sound resembles, never whether anyone spoke. Run
+  # analysis/voice_monitor.py to see the levels your microphone produces.
+  min_level: 0.012
+  # What you say to address it. The spelling "aether" is in neither lexicon, so
+  # each model listens for the token it does have (English "ether", Spanish
+  # "eter"); both sound the same spoken. Set to null to listen continuously and
+  # accept the occasional stray command.
+  wake_word:    aether
+  wake_timeout: 8.0
+  # Utterances no longer than this still work without the wake word, so short
+  # commands ("eco", "hold", "sube") need no ceremony while you play. Anything
+  # longer with no wake word is treated as conversation and dropped whole.
+  short_utterance_words: 3
+
+# -- MIDI output --------------------------------------------------------------
+# Turns the whole gesture + voice surface into a MIDI controller, so it can
+# drive any synth in any DAW instead of only the built-in engine.
+#
+# Windows has no virtual MIDI port of its own: install loopMIDI (free), create
+# a port, then name it below. In FL Studio, right-click any knob on 3x Osc,
+# Sytrus, Serum... choose "Link to controller", move your hand, and it maps.
+# Leave port null to auto-pick the first output that is not the GS wavetable.
+midi:
+  enabled: true
+  # Matched as a substring against the available output names. Naming it
+  # explicitly matters: left null, the picker falls back to whatever port
+  # exists, and on a machine with no loopMIDI that is the built-in GM synth -
+  # so you would hear a General MIDI piano instead of nothing and wonder why.
+  # If no port matches, MIDI simply stays off and says so in the log.
+  port:    loopMIDI
+  channel: 1
+  rate_hz: 50        # cap on CC messages per second per control
+  send_notes: true   # note on/off and pitch bend from the played pitch
+  controls:          # effect -> CC number
+    filter:  74
+    reverb:  91
+    decay:   93
+    damping: 71
+    tremolo: 92
+    drive:   75
+
+# -- MediaPipe ----------------------------------------------------------------
+mediapipe:
+  min_detection_confidence: 0.65
+  min_tracking_confidence:  0.65
+  max_num_hands: 2
+
+# -- Camera -------------------------------------------------------------------
+camera:
+  index: 0

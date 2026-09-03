@@ -1,272 +1,168 @@
+"""Gestural-Harmonic-Mapping — main event loop."""
+import logging
+import sys
+import time
+from pathlib import Path
+
 import cv2
 import mediapipe as mp
-import numpy as np
-import time
 
+# Trigger mediapipe's lazy solution loader immediately after import.
+# This must happen before any other custom-module imports; deferring it
+# (e.g. inside a function) can cause AttributeError on some mediapipe builds.
+try:
+    _mp_hands = mp.solutions.hands
+    _mp_draw  = mp.solutions.drawing_utils
+except AttributeError:
+    print(
+        "ERROR: mediapipe.solutions is not available.\n"
+        "Make sure you are using the project venv:\n"
+        "  .\\venv\\Scripts\\activate\n"
+        "  python main.py"
+    )
+    raise SystemExit(1)
+
+from config import (
+    PINCH_THRESH, DOUBLE_PINCH_THRESH, PYRAMID_THRESH,
+    COOLDOWN_FRAMES,
+    MP_MIN_DETECTION, MP_MIN_TRACKING, MP_MAX_HANDS,
+    CAMERA_INDEX, AMPLITUDE_HILO, AMPLITUDE_POLYGON,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT,
+)
+from gestures import (
+    lm_px, dist, mid, ALL_TIPS,
+    THUMB, INDEX, MIDDLE, RING, PINKY,
+    assign_hands, build_polygon_points,
+)
+from renderer import (
+    draw_skeleton, draw_hilo, draw_polygon,
+    draw_note_label, draw_status_bar, draw_hints, draw_fps,
+    draw_cooldown_border, draw_pinch_guides, draw_recording_indicator,
+    draw_hold_panel, draw_voice_badge, STATE_COLOR, NEAR_WHITE,
+)
+from audio_map import compute_poly_sound
 from synth import (
-    SynthEngine, CHORD_RATIOS,
-    pitch_from_norm, quantize_pentatonic, freq_to_note,
+    SynthEngine, EFFECT_ORDER, quantize_pentatonic, pitch_from_norm, freq_to_note,
+)
+import knob as knobmod
+from knob import EffectKnobController, KnobPoseDetector, measure_hand
+from voice import VoiceListener
+from midiout import MidiController
+from config import (
+    KNOB_TURNS_FULL_RANGE, KNOB_DEAD_ZONE, KNOB_PINCH_CLOSE, KNOB_PINCH_OPEN,
+    KNOB_EXTENDED_ABOVE, KNOB_FOLDED_BELOW, KNOB_REQUIRE_EXTENDED,
+    VOICE_ENABLED, VOICE_MODELS, VOICE_DEVICE, VOICE_SAMPLE_RATE,
+    VOICE_MIN_CONF, VOICE_PHRASE_CONF, VOICE_WAKE_CONF, VOICE_MIN_LEVEL,
+    VOICE_WAKE_WORD, VOICE_WAKE_TIMEOUT, VOICE_SHORT_WORDS,
+    MIDI_ENABLED, MIDI_OUT_PORT, MIDI_CHANNEL, MIDI_RATE_HZ, MIDI_SEND_NOTES,
+    MIDI_CONTROLS,
 )
 
-mp_hands = mp.solutions.hands
-mp_draw  = mp.solutions.drawing_utils
+# ── Logging — file, plus console when there is one ────────────────────────────
+# A windowed PyInstaller build has no stdout: sys.stdout is None, and handing
+# that to StreamHandler crashes on the first log line, before anything has had
+# a chance to say why. The file handler is the one that matters in a frozen
+# build, and it goes next to the executable rather than the working directory,
+# which is wherever the user happened to double-click from.
+def _log_path() -> Path:
+    base = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+            else Path(__file__).parent)
+    return base / "aetheric.log"
 
-# ── Landmark IDs ──────────────────────────────────────────────────────────────
-THUMB    = 4
-INDEX    = 8
-MIDDLE   = 12
-RING     = 16
-PINKY    = 20
-ALL_TIPS = (THUMB, INDEX, MIDDLE, RING, PINKY)
 
-# ── Thresholds (pixels) ───────────────────────────────────────────────────────
-PINCH_THRESH        = 60
-DOUBLE_PINCH_THRESH = 90
-PYRAMID_THRESH      = 70
-COOLDOWN_FRAMES     = 45   # ~1.5 s at 30 fps before auto-reset
-
-# ── Colors (BGR) ──────────────────────────────────────────────────────────────
-PANEL_BG     = (18, 12, 28)
-PANEL_BORDER = (65, 55, 95)
-NEON_GREEN   = (70, 230, 90)
-NEON_CYAN    = (240, 210, 40)
-NEON_PINK    = (215, 65, 230)
-TEXT_DIM     = (145, 135, 165)
-NEAR_WHITE   = (230, 225, 242)
-WARM_RED     = (40, 40, 220)
-
-WAVES       = ("SIN", "SAW", "SQUARE", "TRIANGLE")
-STATE_COLOR = {"IDLE": TEXT_DIM, "HILO": NEON_GREEN, "POLIGONO": NEON_CYAN}
-
-# Effect definitions: (param-key, min-vertices-to-unlock, short-label, color)
-EFFECT_DEFS = [
-    ("filter",  4, "FILTER",  NEON_CYAN),
-    ("reverb",  6, "REVERB",  NEON_PINK),
-    ("tremolo", 8, "TREMOLO", NEON_GREEN),
+_handlers: list[logging.Handler] = [
+    logging.FileHandler(_log_path(), encoding="utf-8")
 ]
+if sys.stdout is not None:
+    _handlers.append(logging.StreamHandler(sys.stdout))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=_handlers,
+)
+log = logging.getLogger(__name__)
+
+WAVES = ("SIN", "SAW", "SQUARE", "TRIANGLE")
+
+# Landmarks the rotary knob needs; kept small so building the map is cheap.
+_KNOB_LANDMARKS = (
+    knobmod.WRIST, knobmod.THUMB_TIP, knobmod.INDEX_MCP, knobmod.INDEX_TIP,
+    knobmod.MIDDLE_MCP, knobmod.MIDDLE_TIP, knobmod.RING_TIP,
+    knobmod.PINKY_MCP, knobmod.PINKY_TIP,
+)
+
+# Number keys select an effect directly, and z/x/c/v pick a waveform: keyboard
+# mirrors of the voice commands. Everything the voice can do, the keyboard can
+# do, so a missing microphone never costs a feature.
+_EFFECT_KEYS = {str(i + 1): name for i, name in enumerate(EFFECT_ORDER)}
+_WAVE_KEYS = dict(zip("zxcv", WAVES))
 
 
-# ── Geometry helpers ──────────────────────────────────────────────────────────
-def lm_px(hand, lid, W, H):
-    m = hand.landmark[lid]
-    return int(m.x * W), int(m.y * H)
-
-def dist(a, b):
-    return float(np.hypot(a[0] - b[0], a[1] - b[1]))
-
-def mid(a, b):
-    return (a[0] + b[0]) // 2, (a[1] + b[1]) // 2
-
-def fingers_up(hand):
-    return sum(
-        1 for tip, knuckle in ((INDEX, 6), (MIDDLE, 10), (RING, 14), (PINKY, 18))
-        if hand.landmark[tip].y < hand.landmark[knuckle].y
-    )
-
-def polygon_area(pts: np.ndarray) -> float:
-    x = pts[:, 0].astype(float)
-    y = pts[:, 1].astype(float)
-    return 0.5 * abs(float(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
+def _landmark_map(hand, W: int, H: int) -> dict:
+    return {lid: lm_px(hand, lid, W, H) for lid in _KNOB_LANDMARKS}
 
 
-# ── Polygon → sound mapping ───────────────────────────────────────────────────
-def compute_poly_sound(poly_pts, active_l, active_r, W, H):
+# ── Initialisation helpers ────────────────────────────────────────────────────
+def _init_camera(index: int) -> cv2.VideoCapture:
+    cam = cv2.VideoCapture(index)
+    if cam.isOpened():
+        return cam
+    for fallback in range(3):
+        if fallback == index:
+            continue
+        cam = cv2.VideoCapture(fallback)
+        if cam.isOpened():
+            log.warning("Camera %d unavailable — using camera %d.", index, fallback)
+            return cam
+    log.error("No camera found. Connect a webcam and restart.")
+    sys.exit(1)
+
+
+def _fit_to_display(frame):
+    """Resample the camera frame to the display size *before* anything is drawn.
+
+    This is what keeps the HUD sharp. The camera here delivers 1920x1080 and
+    many webcams refuse to negotiate anything else, so a window smaller than
+    that used to leave OpenCV rescaling the *finished* frame — HUD text and all
+    — with bilinear interpolation. Downsampling rendered text by an arbitrary
+    ratio is exactly the operation that makes it look chewed, and no amount of
+    better typography survives it.
+
+    Resizing first, with INTER_AREA (a proper area average, the right filter
+    for minification), means every glyph is rasterised once at final size and
+    never resampled again. It also shrinks the MediaPipe input, which is free
+    speed.
     """
-    Return (frequencies, effects_dict, note_pos) from the current polygon.
-
-    Axis mapping:
-      X centroid  → pitch  (left = low, right = high)
-      Y centroid  → filter brightness  (top = open, bottom = dark)
-      Poly area   → reverb wet  (unlocked at 6 vertices)
-      Aspect ratio→ tremolo depth  (unlocked at 8 vertices)
-    """
-    if not poly_pts:
-        return [440.0], {}, None
-
-    pts     = np.array(poly_pts)
-    cx      = float(np.mean(pts[:, 0]))
-    cy      = float(np.mean(pts[:, 1]))
-    n_verts = len(poly_pts)
-
-    # X → pitch
-    base     = quantize_pentatonic(pitch_from_norm(cx / W, lo=110.0, hi=880.0))
-    n_voices = max(2, min(len(active_l) + len(active_r), 8))
-    ratios   = CHORD_RATIOS.get(n_voices, CHORD_RATIOS[8])
-    freqs    = [base * r for r in ratios[:n_voices]]
-
-    # Y → filter (top=open=1, bottom=dark=0)
-    effects = {"filter": float(np.clip(1.0 - cy / H, 0.0, 1.0))}
-
-    # Area → reverb  (active at ≥6 vertices)
-    if n_verts >= 6:
-        area     = polygon_area(pts)
-        max_area = W * H * 0.20          # 20 % of frame as reference
-        effects["reverb"] = float(np.clip(area / max_area, 0.0, 1.0))
-
-    # Aspect ratio → tremolo  (active at ≥8 vertices)
-    if n_verts >= 8:
-        x_span  = float(pts[:, 0].max() - pts[:, 0].min())
-        y_span  = float(pts[:, 1].max() - pts[:, 1].min()) + 1.0
-        aspect  = x_span / y_span
-        # neutral at 1:1, increases as shape gets wider
-        effects["tremolo"] = float(np.clip((aspect - 0.8) / 1.4, 0.0, 1.0))
-
-    note_pos = (int(cx), int(cy))
-    return freqs, effects, note_pos
+    h, w = frame.shape[:2]
+    if (w, h) == (DISPLAY_WIDTH, DISPLAY_HEIGHT):
+        return frame
+    interp = cv2.INTER_AREA if w > DISPLAY_WIDTH else cv2.INTER_LINEAR
+    return cv2.resize(frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT), interpolation=interp)
 
 
-# ── Drawing helpers ───────────────────────────────────────────────────────────
-def blend_fill(img, x, y, w, h, color, alpha):
-    ov = img.copy()
-    cv2.rectangle(ov, (x, y), (x + w, y + h), color, -1)
-    cv2.addWeighted(ov, alpha, img, 1 - alpha, 0, img)
-
-def draw_panel(img, x, y, w, h, alpha=0.68):
-    blend_fill(img, x, y, w, h, PANEL_BG, alpha)
-    cv2.rectangle(img, (x, y), (x + w, y + h), PANEL_BORDER, 1)
-
-def draw_waveform_graph(img, shape, x, y, w, h, color):
-    if w < 4:
-        return
-    t = np.linspace(0, 2 * np.pi, w, endpoint=False)
-    if   shape == "SIN":    wave = np.sin(t)
-    elif shape == "SAW":    wave = (t / np.pi) % 2 - 1.0
-    elif shape == "SQUARE": wave = np.sign(np.sin(t)).astype(float)
-    else:                   wave = 2 * np.abs((t / np.pi) % 2 - 1) - 1
-    margin = 5
-    xs  = (x + np.arange(w)).astype(np.int32)
-    ys  = np.clip(y + h // 2 - wave * (h // 2 - margin), y, y + h - 1).astype(np.int32)
-    pts = np.stack([xs, ys], axis=1).reshape(-1, 1, 2)
-    cv2.polylines(img, [pts], False, color, 2, cv2.LINE_AA)
-
-def draw_note_label(img, note, cx, cy, color):
-    scale = 0.80
-    (tw, th), _ = cv2.getTextSize(note, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
-    pad = 6
-    x0  = cx - tw // 2 - pad
-    y0  = cy - th - pad
-    blend_fill(img, x0, y0, tw + pad * 2, th + pad * 2, PANEL_BG, 0.72)
-    cv2.rectangle(img, (x0, y0), (x0 + tw + pad * 2, y0 + th + pad * 2), color, 1)
-    cv2.putText(img, note, (x0 + pad, cy),
-                cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2, cv2.LINE_AA)
-
-def draw_effect_bars(img, n_verts, effects, x, cy):
-    """Draw compact inline effect bars starting at (x, cy-centred)."""
-    BAR_W = 32
-    for key, min_v, label, col in EFFECT_DEFS:
-        active = n_verts >= min_v
-        lc     = col if active else TEXT_DIM
-        # short letter label
-        cv2.putText(img, label[0], (x, cy + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, lc, 1, cv2.LINE_AA)
-        # bar outline
-        bx, by, bh = x + 12, cy - 5, 10
-        cv2.rectangle(img, (bx, by), (bx + BAR_W, by + bh), PANEL_BORDER, 1)
-        # bar fill
-        if active:
-            fill = int(BAR_W * float(effects.get(key, 0.0)))
-            if fill > 0:
-                cv2.rectangle(img, (bx, by), (bx + fill, by + bh), col, -1)
-        x += BAR_W + 20
-
-def draw_status_bar(img, state, waveform, n_verts, note, effects, W, H):
-    bar_h = 72
-    blend_fill(img, 0, H - bar_h, W, bar_h, PANEL_BG, 0.75)
-    cv2.line(img, (0, H - bar_h), (W, H - bar_h), PANEL_BORDER, 1)
-
-    cy  = H - bar_h // 2
-    col = STATE_COLOR.get(state, NEAR_WHITE)
-
-    # State dot + label
-    cv2.circle(img, (22, cy), 7, col, -1, cv2.LINE_AA)
-    cv2.putText(img, state, (38, cy + 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.80, col, 2, cv2.LINE_AA)
-
-    if state == "HILO":
-        # Show current note in centre
-        if note:
-            cv2.putText(img, note, (W // 2 - 18, cy + 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.70, NEAR_WHITE, 2, cv2.LINE_AA)
-
-    elif state == "POLIGONO":
-        cv2.putText(img, f"{n_verts} pts", (175, cy + 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, NEON_CYAN, 1, cv2.LINE_AA)
-        # Live effect bars (note shown as floating label on polygon)
-        draw_effect_bars(img, n_verts, effects, x=240, cy=cy)
-
-    # Waveform mini-panel (right-anchored)
-    ww, wh = 100, 44
-    wx     = W - ww - 14
-    wy     = H - bar_h + (bar_h - wh) // 2
-    draw_panel(img, wx, wy, ww, wh, alpha=0.55)
-    draw_waveform_graph(img, waveform, wx + 5, wy + 2, ww - 10, wh - 4, NEON_PINK)
-    (tw, _), _ = cv2.getTextSize(waveform, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
-    cv2.putText(img, waveform, (wx - tw - 8, cy + 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, NEON_PINK, 1, cv2.LINE_AA)
-
-def draw_hints(img, state):
-    hints = {
-        "IDLE":     "Doble pinza -> activar HILO",
-        "HILO":     "Beso/Piramide -> POLIGONO   |   Doble pinza -> IDLE",
-        "POLIGONO": "X=nota  Y=filtro  [6pts: +reverb]  [8pts: +tremolo]",
-    }
-    cv2.putText(img, hints.get(state, ""), (14, 26),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, TEXT_DIM, 1, cv2.LINE_AA)
-
-def draw_fps(img, fps, W):
-    cv2.putText(img, f"{fps} fps", (W - 72, 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, TEXT_DIM, 1, cv2.LINE_AA)
-
-def draw_cooldown_border(img, n, W, H):
-    ratio = n / COOLDOWN_FRAMES
-    ov    = img.copy()
-    cv2.rectangle(ov, (0, 0), (W, H), WARM_RED, max(2, int(12 * ratio)))
-    alpha = 0.15 + 0.35 * ratio
-    cv2.addWeighted(ov, alpha, img, 1 - alpha, 0, img)
-
-def draw_skeleton(img, results):
-    if not results.multi_hand_landmarks:
-        return
-    lm_s  = mp_draw.DrawingSpec(color=(70, 60, 85),  thickness=1, circle_radius=2)
-    con_s = mp_draw.DrawingSpec(color=(55, 48, 70), thickness=1)
-    for hand in results.multi_hand_landmarks:
-        mp_draw.draw_landmarks(img, hand, mp_hands.HAND_CONNECTIONS, lm_s, con_s)
-
-def draw_hilo(img, lh, rh, W, H, color):
-    a = lm_px(lh, INDEX, W, H)
-    b = lm_px(rh, INDEX, W, H)
-    cv2.line(img, a, b, color, 3, cv2.LINE_AA)
-    for pt in (a, b):
-        cv2.circle(img, pt, 10, color, -1, cv2.LINE_AA)
-        ov = img.copy()
-        cv2.circle(ov, pt, 20, color, 2, cv2.LINE_AA)
-        cv2.addWeighted(ov, 0.30, img, 0.70, 0, img)
-
-def draw_polygon(img, pts, color):
-    if len(pts) < 3:
-        return
-    arr = np.array(pts, np.int32)
-    ov  = img.copy()
-    cv2.fillPoly(ov, [arr], color)
-    cv2.addWeighted(ov, 0.18, img, 0.82, 0, img)
-    cv2.polylines(img, [arr], True, color, 3, cv2.LINE_AA)
-    for pt in pts:
-        cv2.circle(img, pt, 6, NEAR_WHITE, -1, cv2.LINE_AA)
-        cv2.circle(img, pt, 6, color, 2, cv2.LINE_AA)
+def _init_mediapipe():
+    try:
+        return _mp_hands.Hands(
+            min_detection_confidence=MP_MIN_DETECTION,
+            min_tracking_confidence=MP_MIN_TRACKING,
+            max_num_hands=MP_MAX_HANDS,
+        )
+    except Exception as exc:
+        log.error("Failed to initialise MediaPipe Hands: %s", exc)
+        sys.exit(1)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    hands_model = mp_hands.Hands(
-        min_detection_confidence=0.65,
-        min_tracking_confidence=0.65,
-        max_num_hands=2,
-    )
-    cam   = cv2.VideoCapture(0)
-    synth = SynthEngine()
+    log.info("Starting Aetheric Geometry")
+    hands_model = _init_mediapipe()
+    cam         = _init_camera(CAMERA_INDEX)
+    synth       = SynthEngine()
     if not synth.start():
-        print("[audio] sounddevice not available — running visual-only.")
+        log.warning("Audio unavailable — running visual-only.")
 
+    # ── Application state ─────────────────────────────────────────────────────
     state        = "IDLE"
     waveform     = "SIN"
     active_l     = [INDEX]
@@ -275,22 +171,104 @@ def main():
     pending      = None
     missing      = 0
     current_note = ""
-    current_fx   = {}
+    current_fx: dict = {}
 
+    # FPS counter
     fps_count   = 0
     fps_display = 0
     fps_t       = time.time()
+
+    # UI toggles
+    mirrored   = True
+    fullscreen = False
+    recording  = False
+    rec_count  = 0
+
+    # ── Hold + rotary effect knob ─────────────────────────────────────────────
+    fx_ctl = EffectKnobController(
+        synth, EFFECT_ORDER,
+        turns_for_full_range=KNOB_TURNS_FULL_RANGE,
+        dead_zone_radians=KNOB_DEAD_ZONE,
+    )
+    knob_dets = {
+        "R": KnobPoseDetector(KNOB_PINCH_CLOSE, KNOB_PINCH_OPEN,
+                              KNOB_REQUIRE_EXTENDED, KNOB_EXTENDED_ABOVE,
+                              KNOB_FOLDED_BELOW),
+        "L": KnobPoseDetector(KNOB_PINCH_CLOSE, KNOB_PINCH_OPEN,
+                              KNOB_REQUIRE_EXTENDED, KNOB_EXTENDED_ABOVE,
+                              KNOB_FOLDED_BELOW),
+    }
+    knob_angle = None
+    knob_gripping = False
+
+    listener = VoiceListener(VOICE_MODELS, VOICE_SAMPLE_RATE, VOICE_DEVICE,
+                             VOICE_ENABLED, VOICE_MIN_CONF, VOICE_PHRASE_CONF,
+                             VOICE_WAKE_CONF, VOICE_MIN_LEVEL,
+                             VOICE_WAKE_WORD, VOICE_WAKE_TIMEOUT,
+                             VOICE_SHORT_WORDS)
+    listener.start()
+
+    midi = MidiController(MIDI_ENABLED, MIDI_OUT_PORT, MIDI_CHANNEL,
+                          MIDI_RATE_HZ, MIDI_SEND_NOTES, MIDI_CONTROLS)
+
+    def apply_command(cmd: str) -> None:
+        """Route a command from either voice or keyboard."""
+        nonlocal waveform
+        if cmd.startswith("wave:"):
+            # Takes effect on the next block whether or not anything is
+            # sounding, so a shape can be auditioned through all four shapes
+            # without letting go of it.
+            waveform = cmd.split(":", 1)[1]
+            synth.set_waveform(waveform)
+            log.info("Waveform -> %s", waveform)
+        elif cmd == "hold":
+            if not synth.hold():
+                log.info("Nothing sounding to hold.")
+        elif cmd == "release":
+            synth.release_hold()
+            for det in knob_dets.values():
+                det.reset()
+            fx_ctl.release()
+        elif cmd == "reset":
+            for name in EFFECT_ORDER:
+                synth.set_effect(name, 0.0)
+            synth.set_effect("filter", 1.0)
+            fx_ctl.select(fx_ctl.selected)
+        elif cmd.startswith("select:"):
+            fx_ctl.select(cmd.split(":", 1)[1])
+        elif cmd.startswith("cycle:"):
+            fx_ctl.cycle(int(cmd.split(":", 1)[1]))
+        elif cmd.startswith("nudge:"):
+            # voice.py resolves the direction and any spoken percentage into a
+            # concrete delta before it gets here.
+            value = fx_ctl.nudge(float(cmd.split(":", 1)[1]))
+            log.info("%s -> %.0f%%", fx_ctl.selected, value * 100)
+
+    # Opened at exactly the render size: any other size makes the window scale
+    # the finished frame and undoes the work _fit_to_display just did.
+    cv2.namedWindow("Aetheric Geometry", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Aetheric Geometry", DISPLAY_WIDTH, DISPLAY_HEIGHT)
+    log.info("Keys: q=quit  f=fullscreen  m=mirror  r=record/stop  "
+             "h=hold  g=release  tab=next effect  1-6=pick effect  "
+             "z/x/c/v=sine/saw/square/triangle")
+    log.info("Voice: %s", listener.status)
+    log.info("MIDI:  %s", midi.status)
 
     try:
         while True:
             ok, frame = cam.read()
             if not ok:
+                log.error("Failed to read camera frame — exiting.")
                 break
 
-            frame   = cv2.flip(frame, 1)
+            frame = _fit_to_display(frame)
+            if mirrored:
+                frame = cv2.flip(frame, 1)
+
             H, W    = frame.shape[:2]
             results = hands_model.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
+            # FPS counter
             fps_count += 1
             now = time.time()
             if now - fps_t >= 1.0:
@@ -298,21 +276,33 @@ def main():
                 fps_count   = 0
                 fps_t       = now
 
-            # Assign hands by thumb-x vs pinky-base-x
-            lh = rh = None
-            for m in (results.multi_hand_landmarks or []):
-                if m.landmark[THUMB].x < m.landmark[17].x:
-                    rh = m
-                else:
-                    lh = m
+            lh, rh = assign_hands(results)
 
-            # Waveform selector: left hand finger count, IDLE only
-            if state == "IDLE" and lh:
-                n = fingers_up(lh)
-                if 1 <= n <= 4:
-                    waveform = WAVES[n - 1]
+            # ── Voice commands ────────────────────────────────────────────────
+            for cmd in listener.poll():
+                apply_command(cmd)
 
-            poly_pts = []
+            # ── Held sound: hands drive the effect knob, not the note ─────────
+            held = synth.is_held
+            knob_gripping = False
+            knob_angle = None
+            if held:
+                for tag, hand in (("R", rh), ("L", lh)):
+                    det = knob_dets[tag]
+                    if hand is None:
+                        det.reset()
+                        continue
+                    m = measure_hand(_landmark_map(hand, W, H))
+                    if det.push(m["pinch"], m["extensions"]):
+                        fx_ctl.update(m["angle"], True)
+                        knob_gripping = True
+                        knob_angle = m["angle"]
+                        break
+                if not knob_gripping:
+                    fx_ctl.release()
+
+            # ── Two-hand gesture + state machine ──────────────────────────────
+            poly_pts: list = []
 
             if lh and rh:
                 missing = 0
@@ -333,11 +323,11 @@ def main():
                     ) >= 4
                 )
 
-                # State machine
                 if state == "IDLE":
                     if rise:
                         state   = "HILO"
                         pending = None
+                        log.debug("IDLE → HILO")
 
                 elif state == "HILO":
                     if kiss:
@@ -345,11 +335,13 @@ def main():
                         active_l = [INDEX]
                         active_r = [INDEX]
                         pending  = None
+                        log.debug("HILO → POLIGONO (kiss)")
                     elif pyramid:
                         state    = "POLIGONO"
                         active_l = list(ALL_TIPS[1:])
                         active_r = list(ALL_TIPS[1:])
                         pending  = None
+                        log.debug("HILO → POLIGONO (pyramid)")
                     elif rise:
                         pending = "RESET"
                     elif fall and pending == "RESET":
@@ -357,10 +349,12 @@ def main():
                         active_l = [INDEX]
                         active_r = [INDEX]
                         pending  = None
+                        log.debug("HILO → IDLE")
 
                 elif state == "POLIGONO":
                     if kiss:
                         state = "HILO"
+                        log.debug("POLIGONO → HILO")
                     for lid in (MIDDLE, RING, PINKY):
                         if dist(pl, lm_px(lh, lid, W, H)) < PINCH_THRESH and lid not in active_l:
                             active_l.append(lid)
@@ -370,25 +364,28 @@ def main():
                 prev_dpinch = d_pinch
 
                 if state == "POLIGONO":
-                    for d in (THUMB, INDEX, MIDDLE, RING, PINKY):
-                        if d == THUMB or d in active_l:
-                            poly_pts.append(lm_px(lh, d, W, H))
-                    for d in (PINKY, RING, MIDDLE, INDEX, THUMB):
-                        if d == THUMB or d in active_r:
-                            poly_pts.append(lm_px(rh, d, W, H))
+                    poly_pts = build_polygon_points(lh, rh, active_l, active_r, W, H)
 
             elif state != "IDLE":
                 missing += 1
                 if missing > COOLDOWN_FRAMES:
+                    log.debug("Hands lost — reset to IDLE")
                     state       = "IDLE"
                     prev_dpinch = False
                     active_l    = [INDEX]
                     active_r    = [INDEX]
+                    synth.send_midi_note(None)
 
             # ── Sound ─────────────────────────────────────────────────────────
             note_pos = None
+            current_freq = None
 
-            if state == "IDLE":
+            if held:
+                # The note is frozen and the hands are on the knob, so the
+                # gesture-to-pitch path is deliberately dormant.
+                pass
+
+            elif state == "IDLE":
                 synth.set_params(False, [], waveform)
                 current_note = ""
                 current_fx   = {}
@@ -399,8 +396,12 @@ def main():
                 freq   = quantize_pentatonic(
                     pitch_from_norm(dist(il_pos, ir_pos) / W, lo=880.0, hi=110.0)
                 )
-                synth.set_params(True, [freq], waveform)
-                current_note = freq_to_note(freq)
+                synth.set_params(True, [freq], waveform, amplitude=AMPLITUDE_HILO)
+                current_freq = freq
+                new_note = freq_to_note(freq)
+                if new_note != current_note:
+                    synth.send_midi_note(freq)
+                current_note = new_note
                 current_fx   = {}
                 note_pos     = mid(il_pos, ir_pos)
 
@@ -408,13 +409,35 @@ def main():
                 freqs, effects, note_pos = compute_poly_sound(
                     poly_pts, active_l, active_r, W, H
                 )
-                synth.set_params(True, freqs, waveform, amplitude=0.22, effects=effects)
-                current_note = freq_to_note(freqs[0])
+                synth.set_params(True, freqs, waveform,
+                                 amplitude=AMPLITUDE_POLYGON, effects=effects)
+                current_freq = freqs[0]
+                new_note = freq_to_note(freqs[0])
+                if new_note != current_note:
+                    synth.send_midi_note(freqs[0])
+                current_note = new_note
                 current_fx   = effects
+
+            # ── MIDI mirror ───────────────────────────────────────────────────
+            # Sent every frame, but MidiController drops anything that has not
+            # actually changed, so a still hand produces no traffic.
+            if midi.available:
+                midi.send_effects(synth.snapshot_effects())
+                if held:
+                    pass                      # frozen note keeps sounding
+                elif state == "IDLE":
+                    midi.send_pitch(None)
+                elif current_freq:
+                    midi.send_pitch(current_freq)
 
             # ── Render ────────────────────────────────────────────────────────
             draw_skeleton(frame, results)
             col = STATE_COLOR.get(state, NEAR_WHITE)
+
+            if state == "IDLE":
+                h = lh or rh
+                if h:
+                    draw_pinch_guides(frame, h, W, H)
 
             if state == "HILO" and lh and rh:
                 draw_hilo(frame, lh, rh, W, H, col)
@@ -429,17 +452,64 @@ def main():
 
             draw_status_bar(frame, state, waveform, len(poly_pts),
                             current_note, current_fx, W, H)
-            draw_hints(frame, state)
+            draw_hints(frame, state, recording)
             draw_fps(frame, fps_display, W)
+            if listener.available:
+                draw_voice_badge(frame, listener.wake_word, listener.awake, W, H)
+
+            if held:
+                draw_hold_panel(frame, synth.snapshot_effects(), EFFECT_ORDER,
+                                fx_ctl.selected, knob_gripping, knob_angle, W, H)
+
+            if recording:
+                draw_recording_indicator(frame, W)
 
             cv2.imshow("Aetheric Geometry", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+
+            # ── Key handling ──────────────────────────────────────────────────
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 break
+            elif key == ord("f"):
+                fullscreen = not fullscreen
+                prop = cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL
+                cv2.setWindowProperty("Aetheric Geometry", cv2.WND_PROP_FULLSCREEN, prop)
+                log.info("Fullscreen %s", "on" if fullscreen else "off")
+            elif key == ord("m"):
+                mirrored = not mirrored
+                log.info("Mirror %s", "on" if mirrored else "off")
+            elif key == ord("r"):
+                if not recording:
+                    synth.start_recording()
+                    recording = True
+                else:
+                    rec_count += 1
+                    path = synth.stop_recording(f"recording_{rec_count:03d}.wav")
+                    if path:
+                        log.info("Saved: %s", path)
+                    recording = False
+            elif key == ord("h"):
+                apply_command("hold")
+            elif key == ord("g"):
+                apply_command("release")
+            elif key == 9:  # Tab
+                apply_command("cycle:1")
+            elif 32 <= key < 127 and chr(key) in _EFFECT_KEYS:
+                apply_command(f"select:{_EFFECT_KEYS[chr(key)]}")
+            elif 32 <= key < 127 and chr(key) in _WAVE_KEYS:
+                apply_command(f"wave:{_WAVE_KEYS[chr(key)]}")
+
     finally:
+        listener.stop()
+        midi.close()
+        if recording:
+            synth.stop_recording(f"recording_{rec_count + 1:03d}.wav")
+        synth.send_midi_note(None)
         synth.stop()
         cam.release()
         hands_model.close()
         cv2.destroyAllWindows()
+        log.info("Shutdown complete")
 
 
 if __name__ == "__main__":

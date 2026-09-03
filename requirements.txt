@@ -1,4 +1,27 @@
 opencv-python
 mediapipe
 numpy
+scipy
 sounddevice
+pyyaml
+pillow          # HUD typography and panels (ui.py)
+
+# Voice commands, offline. Needs models too - see config.yaml voice.models:
+#   https://alphacephei.com/vosk/models
+#   vosk-model-small-en-us-0.15   (English, 40 MB)
+#   vosk-model-small-es-0.42      (Spanish, 38 MB)
+# Without them the keyboard still drives every command.
+vosk
+
+# MIDI out, to drive any synth in any DAW. On Windows you also need a virtual
+# port: install loopMIDI (free) and create one, then set midi.port in
+# config.yaml. Without mido the app runs, it just cannot send.
+mido
+python-rtmidi
+
+# Optional - test suite and the analysis/ measurement scripts
+# pytest
+# matplotlib
+
+# Optional - building the desktop executable (see build.bat)
+# pyinstaller
