@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from synth import (
+from aetheric.synth import (
     pitch_from_norm, quantize_pentatonic, freq_to_note, CHORD_RATIOS,
 )
 
@@ -78,12 +78,12 @@ class TestOscillatorBank:
 
     @staticmethod
     def _engine():
-        from synth import SynthEngine
+        from aetheric.synth import SynthEngine
         return SynthEngine()
 
     @staticmethod
     def _shape_of(name):
-        from synth import WAVE_RAMP
+        from aetheric.synth import WAVE_RAMP
         return WAVE_RAMP.index(name) / (len(WAVE_RAMP) - 1)
 
     @pytest.mark.parametrize("wave", ["SIN", "SAW", "SQUARE", "TRIANGLE"])
@@ -127,13 +127,13 @@ class TestOscillatorBank:
 class TestShapeMorph:
     @staticmethod
     def _engine():
-        from synth import SynthEngine
+        from aetheric.synth import SynthEngine
         return SynthEngine()
 
     def test_integer_points_are_the_named_waveforms(self):
         """The four shapes are just the whole-number stops of one control."""
-        from dsp import BlepTriangle
-        from synth import WAVE_RAMP
+        from aetheric.dsp import BlepTriangle
+        from aetheric.synth import WAVE_RAMP
         inc = 220.0 / 44100.0
         phase = (np.arange(512) * inc) % 1.0
         for i, name in enumerate(WAVE_RAMP):
@@ -146,7 +146,7 @@ class TestShapeMorph:
 
     def test_halfway_is_between_its_neighbours(self):
         """A blend must sit between the two shapes it mixes, sample by sample."""
-        from synth import WAVE_RAMP
+        from aetheric.synth import WAVE_RAMP
         step = 1.0 / (len(WAVE_RAMP) - 1)
         lo = self._engine()._render_partials([220.0], 0.0, 512)
         hi = self._engine()._render_partials([220.0], step, 512)
@@ -193,8 +193,8 @@ class TestShapeMorph:
     def test_shapes_share_a_fundamental_phase(self):
         """What makes the blend add instead of subtract: every shape's
         fundamental must point the same way."""
-        from synth import WAVE_RAMP
-        from dsp import BlepTriangle
+        from aetheric.synth import WAVE_RAMP
+        from aetheric.dsp import BlepTriangle
         inc = 220.0 / 44100.0
         n = 4096
         phase = (np.arange(n) * inc) % 1.0
@@ -237,7 +237,7 @@ class TestShapeMorph:
 class TestHold:
     @staticmethod
     def _engine():
-        from synth import SynthEngine
+        from aetheric.synth import SynthEngine
         return SynthEngine()
 
     def test_hold_refuses_when_silent(self):

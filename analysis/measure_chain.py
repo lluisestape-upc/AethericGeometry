@@ -40,7 +40,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config  # noqa: E402
+from aetheric import config  # noqa: E402
 
 FRAMES = 200
 SR = 48000
@@ -65,9 +65,9 @@ def stage_a() -> None:
     import cv2
     import mediapipe as mp
 
-    import midiout
-    from audio_map import compute_poly_sound
-    from gestures import ALL_TIPS, assign_hands, build_polygon_points
+    from aetheric import midiout
+    from aetheric.audio_map import compute_poly_sound
+    from aetheric.gestures import ALL_TIPS, assign_hands, build_polygon_points
 
     print("\n=== Stage A: camera frame -> MIDI on the wire ===")
     print(f"    {FRAMES} frames. Keep both hands in view for a real reading.\n")
@@ -154,7 +154,7 @@ def stage_b() -> None:
     import mido
     import sounddevice as sd
 
-    import midiout
+    from aetheric import midiout
 
     print("\n=== Stage B: MIDI sent -> audible change in the DAW ===")
     print("    Preconditions:")

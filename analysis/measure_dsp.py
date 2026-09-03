@@ -31,7 +31,7 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dsp import (  # noqa: E402
+from aetheric.dsp import (  # noqa: E402
     DampedComb, SchroederAllpass, blep_saw, blep_square, rt60_to_feedback,
 )
 

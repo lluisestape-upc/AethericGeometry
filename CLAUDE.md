@@ -32,21 +32,32 @@ bash build.sh       # Mac/Linux
 ## Architecture
 
 ```
-main.py        — thin event loop, state machine, key handling
-gestures.py    — geometry helpers, gesture detectors, hand assignment
-knob.py        — rotary hand knob: grip detection, accumulating rotation
-voice.py       — offline (Vosk) voice commands on a background thread
-ui.py          — HUD toolkit: TrueType text, panels, dial, tile cache
-renderer.py    — gesture overlays (OpenCV) + HUD composition (via ui.py)
-audio_map.py   — compute_poly_sound(): polygon geometry → synth parameters
-tuning.py      — exact just-intonation ratios, pitch/note/MIDI helpers
-dsp.py         — DSP primitives: PolyBLEP oscillators, TPT filter, comb/allpass
-synth.py       — SynthEngine: oscillator bank, filter, reverb, hold, recording, MIDI
-config.py      — loads config.yaml, exposes flat constants with safe fallbacks
-config.yaml    — user-editable thresholds, timings, colors, audio params
-tests/         — pytest suite (gestures, audio_map, synth, dsp, tuning, knob)
-analysis/      — measure_dsp.py: reproduces every number quoted below
+main.py          — entry point at repo root: event loop, state machine, keys
+config.yaml      — user-editable thresholds, timings, colors, audio params
+pyproject.toml   — package metadata + pytest config (pythonpath = ".")
+aetheric/        — engine package (importable as `aetheric.*`)
+  gestures.py    — geometry helpers, gesture detectors, hand assignment
+  knob.py        — rotary hand knob: grip detection, accumulating rotation
+  voice.py       — offline (Vosk) voice commands on a background thread
+  vocabulary.py  — bilingual command → keyword tables
+  ui.py          — HUD toolkit: TrueType text, panels, dial, tile cache
+  renderer.py    — gesture overlays (OpenCV) + HUD composition (via ui.py)
+  audio_map.py   — compute_poly_sound(): polygon geometry → synth parameters
+  tuning.py      — exact just-intonation ratios, pitch/note/MIDI helpers
+  dsp.py         — DSP primitives: PolyBLEP oscillators, TPT filter, comb/allpass
+  synth.py       — SynthEngine: oscillator bank, filter, reverb, hold, recording, MIDI
+  midiout.py     — optional MIDI output controller
+  config.py      — loads config.yaml, exposes flat constants with safe fallbacks
+tests/           — pytest suite (gestures, audio_map, synth, dsp, tuning, knob, voice)
+analysis/        — measure_dsp.py: reproduces every number quoted below
 ```
+
+**Imports:** modules inside `aetheric/` use relative imports (`from .dsp import`);
+`main.py`, `tests/` and `analysis/` import the package absolutely
+(`from aetheric.synth import`). `config.py` anchors `config.yaml` and `models/`
+to the repo root (one level above the package), so both stay user-facing at the
+top level. PyInstaller still analyses `main.py` and picks up the package
+automatically — `AethericGeometry.spec` needed no change.
 
 `dsp.py`, `tuning.py` and `knob.py` are deliberately free of camera, audio and
 MediaPipe dependencies, so the whole numeric core is testable and measurable

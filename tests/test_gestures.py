@@ -22,7 +22,7 @@ def _make_hand(coords: dict) -> types.SimpleNamespace:
 
 
 # ── Coordinate helpers ────────────────────────────────────────────────────────
-import gestures as G
+import aetheric.gestures as G
 
 W, H = 640, 480
 

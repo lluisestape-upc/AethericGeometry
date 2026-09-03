@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from dsp import (
+from aetheric.dsp import (
     BlepTriangle, DCBlocker, DampedComb, OnePoleTPT, SchroederAllpass,
     blep_saw, blep_square, rt60_to_feedback, soft_clip, tau_to_alpha,
 )

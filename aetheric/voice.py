@@ -54,7 +54,7 @@ from pathlib import Path
 
 import numpy as np
 
-import vocabulary
+from . import vocabulary
 
 log = logging.getLogger(__name__)
 

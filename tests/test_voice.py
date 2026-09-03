@@ -3,9 +3,9 @@ import time
 
 import pytest
 
-import vocabulary
-from synth import EFFECT_ORDER
-from voice import VoiceListener
+from aetheric import vocabulary
+from aetheric.synth import EFFECT_ORDER
+from aetheric.voice import VoiceListener
 
 LANGUAGES = sorted(vocabulary.LANGUAGES)
 

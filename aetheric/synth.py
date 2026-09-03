@@ -38,12 +38,12 @@ import wave
 
 import numpy as np
 
-from dsp import (
+from .dsp import (
     BlepTriangle, DCBlocker, DampedComb, OnePoleTPT, SchroederAllpass,
     blep_saw, blep_square, soft_clip, tau_to_alpha,
 )
 # Re-exported so existing importers keep working.
-from tuning import (  # noqa: F401
+from .tuning import (  # noqa: F401
     CHORD_RATIOS, chord_frequencies, freq_to_midi, freq_to_note,
     pitch_from_norm, quantize_pentatonic,
 )
@@ -63,7 +63,7 @@ try:
 except ImportError:
     _MIDI_OK = False
 
-from config import (
+from .config import (
     SAMPLE_RATE, BLOCK_SIZE,
     ATTACK_TAU, RELEASE_TAU, REVERB_TAIL_TAU,
     REVERB_RT60_MIN, REVERB_RT60_MAX,

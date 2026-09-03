@@ -22,33 +22,33 @@ except AttributeError:
     )
     raise SystemExit(1)
 
-from config import (
+from aetheric.config import (
     PINCH_THRESH, DOUBLE_PINCH_THRESH, PYRAMID_THRESH,
     COOLDOWN_FRAMES,
     MP_MIN_DETECTION, MP_MIN_TRACKING, MP_MAX_HANDS,
     CAMERA_INDEX, AMPLITUDE_HILO, AMPLITUDE_POLYGON,
     DISPLAY_WIDTH, DISPLAY_HEIGHT,
 )
-from gestures import (
+from aetheric.gestures import (
     lm_px, dist, mid, ALL_TIPS,
     THUMB, INDEX, MIDDLE, RING, PINKY,
     assign_hands, build_polygon_points,
 )
-from renderer import (
+from aetheric.renderer import (
     draw_skeleton, draw_hilo, draw_polygon,
     draw_note_label, draw_status_bar, draw_hints, draw_fps,
     draw_cooldown_border, draw_pinch_guides, draw_recording_indicator,
     draw_hold_panel, draw_voice_badge, STATE_COLOR, NEAR_WHITE,
 )
-from audio_map import compute_poly_sound
-from synth import (
+from aetheric.audio_map import compute_poly_sound
+from aetheric.synth import (
     SynthEngine, EFFECT_ORDER, quantize_pentatonic, pitch_from_norm, freq_to_note,
 )
-import knob as knobmod
-from knob import EffectKnobController, KnobPoseDetector, measure_hand
-from voice import VoiceListener
-from midiout import MidiController
-from config import (
+import aetheric.knob as knobmod
+from aetheric.knob import EffectKnobController, KnobPoseDetector, measure_hand
+from aetheric.voice import VoiceListener
+from aetheric.midiout import MidiController
+from aetheric.config import (
     KNOB_TURNS_FULL_RANGE, KNOB_DEAD_ZONE, KNOB_PINCH_CLOSE, KNOB_PINCH_OPEN,
     KNOB_EXTENDED_ABOVE, KNOB_FOLDED_BELOW, KNOB_REQUIRE_EXTENDED,
     VOICE_ENABLED, VOICE_MODELS, VOICE_DEVICE, VOICE_SAMPLE_RATE,

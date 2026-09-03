@@ -4,7 +4,7 @@ from fractions import Fraction
 
 import pytest
 
-from tuning import (
+from aetheric.tuning import (
     CHORD_RATIOS, MAJOR_THIRD, OCTAVE, PERFECT_FIFTH, PERFECT_FOURTH,
     cents, cents_from_12tet, chord_frequencies, freq_to_midi, freq_to_note,
     interval_name, pitch_from_norm, quantize_pentatonic,

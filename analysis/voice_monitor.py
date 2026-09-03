@@ -31,9 +31,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config  # noqa: E402
-import vocabulary  # noqa: E402
-from voice import _build_recognizer, block_level  # noqa: E402
+from aetheric import config  # noqa: E402
+from aetheric import vocabulary  # noqa: E402
+from aetheric.voice import _build_recognizer, block_level  # noqa: E402
 
 COMMAND_WORDS, FILLER_WORDS = vocabulary.get(config.VOICE_LANGUAGE)
 

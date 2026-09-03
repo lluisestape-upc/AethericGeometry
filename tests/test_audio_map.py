@@ -1,7 +1,7 @@
 """Unit tests for audio_map.py — polygon-to-sound mapping."""
 import pytest
 
-from audio_map import compute_poly_sound
+from aetheric.audio_map import compute_poly_sound
 
 W, H = 640, 480
 

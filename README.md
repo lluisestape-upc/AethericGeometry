@@ -251,25 +251,33 @@ audio:
 ## Project layout
 
 ```
-main.py         — event loop, state machine, key handling
-gestures.py     — geometry helpers, gesture detectors, hand assignment
-knob.py         — rotary "hold" knob: grip detection, accumulating rotation
-voice.py        — offline (Vosk) voice commands on a background thread
-vocabulary.py   — bilingual command → keyword tables
-ui.py           — HUD toolkit: TrueType text, panels, dial, tile cache
-renderer.py     — gesture overlays (OpenCV) + HUD composition
-audio_map.py    — compute_poly_sound(): polygon geometry → synth parameters
-tuning.py       — exact just-intonation ratios, pitch/note/MIDI helpers
-dsp.py          — DSP primitives: PolyBLEP oscillators, TPT filter, comb/allpass
-synth.py        — SynthEngine: oscillator bank, filter, reverb, hold, recording, MIDI
-midiout.py      — optional MIDI output controller
-config.py       — loads config.yaml, exposes flat constants with safe fallbacks
-config.yaml     — user-editable thresholds, timings, colours, audio params
-tests/          — pytest suite (gestures, audio_map, synth, dsp, tuning, knob, voice)
-analysis/       — offline measurement scripts that reproduce every quoted figure
-docs/           — LaTeX technical report (PDF + source)
-assets/         — demo video and images (not committed; video is on YouTube)
+main.py             — entry point: event loop, state machine, key handling
+config.yaml         — user-editable thresholds, timings, colours, audio params
+pyproject.toml      — package metadata + pytest config
+aetheric/           — the engine package
+├── gestures.py     — geometry helpers, gesture detectors, hand assignment
+├── knob.py         — rotary "hold" knob: grip detection, accumulating rotation
+├── voice.py        — offline (Vosk) voice commands on a background thread
+├── vocabulary.py   — bilingual command → keyword tables
+├── ui.py           — HUD toolkit: TrueType text, panels, dial, tile cache
+├── renderer.py     — gesture overlays (OpenCV) + HUD composition
+├── audio_map.py    — compute_poly_sound(): polygon geometry → synth parameters
+├── tuning.py       — exact just-intonation ratios, pitch/note/MIDI helpers
+├── dsp.py          — DSP primitives: PolyBLEP oscillators, TPT filter, comb/allpass
+├── synth.py        — SynthEngine: oscillator bank, filter, reverb, hold, recording, MIDI
+├── midiout.py      — optional MIDI output controller
+└── config.py       — loads config.yaml, exposes flat constants with safe fallbacks
+tests/              — pytest suite (gestures, audio_map, synth, dsp, tuning, knob, voice)
+analysis/           — offline measurement scripts that reproduce every quoted figure
+docs/               — LaTeX technical report (PDF + source)
+models/             — Vosk speech models (not committed; download separately)
+assets/             — demo video and images (not committed; video is on YouTube)
 ```
+
+The modules live in an importable `aetheric` package; `main.py` stays at the
+repo root as the entry point (`python main.py`). `config.yaml` and `models/`
+also stay at the root — user-facing files the program resolves relative to the
+project, not to the package.
 
 The HUD is worth a note: text goes through Pillow with real TrueType faces (OpenCV's Hershey fonts looked unfinished), and rasterised panels are cached by content. Rendering from scratch cost 39 ms/frame; caching, premultiplied RGB→BGR blits and OpenCV compositing bring the steady state to **5.7 ms**, and **11.6 ms** while a knob is turning.
 

@@ -25,8 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config  # noqa: E402
-import midiout  # noqa: E402
+from aetheric import config  # noqa: E402
+from aetheric import midiout  # noqa: E402
 
 # A rising arpeggio, so it is obviously deliberate rather than a stuck note.
 MELODY = [60, 64, 67, 72, 67, 64, 60]

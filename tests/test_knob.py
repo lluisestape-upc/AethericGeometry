@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from knob import (
+from aetheric.knob import (
     INDEX_MCP, INDEX_TIP, MIDDLE_MCP, MIDDLE_TIP, PINKY_MCP, PINKY_TIP,
     RING_TIP, THUMB_TIP, WRIST,
     KnobPoseDetector, RotaryKnob, hand_rotation, measure_hand, palm_width,

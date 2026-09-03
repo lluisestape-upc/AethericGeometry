@@ -29,9 +29,9 @@ import time
 import cv2
 import numpy as np
 
-import ui
-from config import COOLDOWN_FRAMES, PINCH_THRESH
-from gestures import INDEX, PINKY, THUMB, dist, lm_px
+from . import ui
+from .config import COOLDOWN_FRAMES, PINCH_THRESH
+from .gestures import INDEX, PINKY, THUMB, dist, lm_px
 
 # ── Gesture-layer colours (BGR, for OpenCV) ───────────────────────────────────
 NEAR_WHITE = (243, 236, 233)

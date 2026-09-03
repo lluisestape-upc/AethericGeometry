@@ -1,8 +1,8 @@
 """Maps polygon geometry to synthesis parameters."""
 import numpy as np
 
-from gestures import polygon_area
-from tuning import chord_frequencies, pitch_from_norm, quantize_pentatonic
+from .gestures import polygon_area
+from .tuning import chord_frequencies, pitch_from_norm, quantize_pentatonic
 
 
 def compute_poly_sound(poly_pts: list, active_l: list, active_r: list,

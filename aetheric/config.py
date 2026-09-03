@@ -10,8 +10,9 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 #: Where bundled resources live: the PyInstaller extraction root when frozen,
-#: the source folder otherwise.
-_HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+#: the project root otherwise. config.py now lives in the ``aetheric`` package,
+#: so the source root — where config.yaml and models/ sit — is one level up.
+_HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 
 #: Where the *user's* editable files live: beside the executable when frozen.
 #: Shipping config.yaml read-only inside the bundle would mean a rebuild to

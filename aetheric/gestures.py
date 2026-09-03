@@ -1,7 +1,7 @@
 """Geometry utilities and gesture detection functions."""
 import numpy as np
 
-from config import (
+from .config import (
     PINCH_THRESH, PYRAMID_THRESH, PRAYER_DIST, OPEN_PALM_SPREAD,
 )
 

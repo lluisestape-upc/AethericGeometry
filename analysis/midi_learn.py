@@ -26,8 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config  # noqa: E402
-import midiout  # noqa: E402
+from aetheric import config  # noqa: E402
+from aetheric import midiout  # noqa: E402
 
 RATE_HZ = 25.0
 SWEEP_SECONDS = 2.5
